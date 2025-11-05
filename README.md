@@ -1,35 +1,24 @@
-# TrailShare (clean full demo)
-
-This is a clean, ASCII-only TrailShare demo that includes:
-
-- Trail feed with reports
-- Create report modal (photos, hazards, difficulty, rating)
-- Optional GPS link and lat/lng fields
-- Simple map stub using OpenStreetMap iframe
-- LocalStorage persistence
-- Mobile bottom nav
+# TrailShare Pro+ (MVP bundle)
+Includes:
+- Leaflet interactive map with markers
+- GPS autofill button in New Report
+- Photo compression (client-side)
+- Comments + helpful votes
+- PWA install (Android add-to-home-screen)
+- Simple offline cache via service worker
 
 ## Run locally
-
-```bash
 npm install
 npm run dev
-```
 
-Open the printed URL.
-
-## Build for production
-
-```bash
+## Build
 npm run build
-npm run preview
-```
 
 ## Deploy to Vercel
+- Project settings: Framework = Vite
+- Build command: npm run build
+- Output directory: dist
 
-- Import the repo in Vercel
-- Framework preset: **Vite**
-- Build Command: `npm run build`
-- Output Directory: `dist`
-
-Done.
+## Notes
+- Data is in localStorage (LS key trailshare_reports_v2).
+- Supabase is included as a dependency but not wired; we can connect it once you provide a project URL and anon key.

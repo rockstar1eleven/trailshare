@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import L from "leaflet";
 
 type Difficulty = "Easy" | "Moderate" | "Hard" | "Expert";
+
+type Comment = { id: string; text: string; ts: number };
 
 type Report = {
   id: string;
@@ -19,12 +22,13 @@ type Report = {
   lng?: number;
   images: string[];
   helpful: number;
+  comments?: Comment[];
 };
 
 type Tab = "feed" | "map";
 
 const DIFFICULTIES: Difficulty[] = ["Easy", "Moderate", "Hard", "Expert"];
-const LS_KEY = "trailshare_reports_v1";
+const LS_KEY = "trailshare_reports_v2";
 
 const CONDITION_TAGS = [
   { key: "clear", label: "Clear", color: "#22c55e" },
@@ -69,7 +73,8 @@ const seed: Report[] = [
     description: "Sunny and windy along the bluffs. Trail in good shape.",
     images: [],
     helpful: 7,
-    lat: 42.05, lng: -124.28
+    lat: 42.05, lng: -124.28,
+    comments: [{ id: uid(), text: "Nice views near sunset!", ts: Date.now()-86400000 }]
   },
   {
     id: uid(),
@@ -85,7 +90,8 @@ const seed: Report[] = [
     description: "Coastal fog until noon. Wildflowers still popping.",
     images: [],
     helpful: 12,
-    lat: 42.12, lng: -124.37
+    lat: 42.12, lng: -124.37,
+    comments: []
   }
 ];
 
@@ -115,42 +121,40 @@ function Tag({ t }: { t: string }) {
 function Stars({ value }: { value: number }) {
   return (
     <span aria-label={`Rating ${value} of 5`}>
-      {"★".repeat(value)}{"☆".repeat(5 - value)}
+      {"*".repeat(value)}{".".repeat(5 - value)}
     </span>
   );
 }
 
-function MapStub({ reports }: { reports: Report[] }) {
-  // Simple "map": list pins and show a static OpenStreetMap iframe centered to first pin
-  const first = reports.find(r => typeof r.lat === "number" && typeof r.lng === "number");
-  const src = first
-    ? `https://www.openstreetmap.org/export/embed.html?bbox=${first.lng-0.2}%2C${first.lat-0.2}%2C${first.lng+0.2}%2C${first.lat+0.2}&layer=mapnik&marker=${first.lat}%2C${first.lng}`
-    : "";
-  return (
-    <div className="card">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h3>Map (prototype)</h3>
-        <small>{reports.length} reports</small>
-      </div>
-      <div style={{ display: "grid", gap: 8 }}>
-        <div style={{ height: 220, borderRadius: 12, overflow: "hidden", background: "#d1fae5" }}>
-          {src ? (
-            <iframe title="map" src={src} style={{ border: 0, width: "100%", height: "100%" }}></iframe>
-          ) : (
-            <div style={{ padding: 12, color: "#065f46" }}>Add a report with latitude and longitude to center the map.</div>
-          )}
-        </div>
-        <div className="tags">
-          {reports.filter(r => r.lat && r.lng).map(r => (
-            <span key={r.id} className="tag">
-              <strong>{r.trailName}</strong>
-              <span>{r.lat?.toFixed(3)}, {r.lng?.toFixed(3)}</span>
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+function LeafletMap({ reports }: { reports: Report[] }) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const map = useRef<L.Map | null>(null);
+
+  useEffect(() => {
+    if (!mapRef.current || map.current) return;
+    map.current = L.map(mapRef.current).setView([42.05, -124.28], 10);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap"
+    }).addTo(map.current);
+  }, []);
+
+  useEffect(() => {
+    if (!map.current) return;
+    const m = map.current;
+    const layer = L.layerGroup().addTo(m);
+    const coords = reports.filter(r => typeof r.lat === "number" && typeof r.lng === "number");
+    if (coords.length) {
+      const bounds = L.latLngBounds(coords.map(r => [r.lat as number, r.lng as number]));
+      m.fitBounds(bounds.pad(0.25));
+    }
+    coords.forEach(r => {
+      const marker = L.marker([r.lat as number, r.lng as number]).addTo(layer);
+      marker.bindPopup(`<b>${r.trailName}</b><br/>${(r.area||"")}`);
+    });
+    return () => { m.removeLayer(layer); };
+  }, [reports]);
+
+  return <div className="map" ref={mapRef} />;
 }
 
 function Empty({ onNew }: { onNew: () => void }) {
@@ -181,7 +185,7 @@ function Toolbar(props: {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder='Search trails or areas'
+          placeholder="Search trails or areas"
           aria-label="Search"
         />
         <select
@@ -214,9 +218,19 @@ function Toolbar(props: {
   );
 }
 
-function ReportCard({ report, onHelpful }: { report: Report; onHelpful: (id: string) => void }) {
+function ReportCard({ report, onHelpful, onAddComment }: { report: Report; onHelpful: (id: string) => void; onAddComment: (id: string, text: string) => void }) {
+  const [text, setText] = useState("");
+  const danger = (report.hazards||"").toLowerCase();
+  const showAlert = /ice|washout|bear|cougar|slide|closed|closure|fire|snow|flood|downed/.test(danger);
+
   return (
     <article className="card report">
+      {showAlert && (
+        <div style={{ background:"#fee2e2", border:"1px solid #ef4444", color:"#991b1b", borderRadius:10, padding:8 }}>
+          Safety alert: {report.hazards}
+        </div>
+      )}
+
       <div className="row" style={{ justifyContent: "space-between" }}>
         <div>
           <h3>{report.trailName} <small style={{ color:"#6b7280" }}>{report.area}</small></h3>
@@ -251,6 +265,23 @@ function ReportCard({ report, onHelpful }: { report: Report; onHelpful: (id: str
 
       <p style={{ margin: 0 }}>{report.description}</p>
 
+      {typeof report.lat === "number" && typeof report.lng === "number" ? (
+        <div style={{ fontSize:12, color:"#6b7280" }}>Coords: {report.lat.toFixed(4)}, {report.lng.toFixed(4)}</div>
+      ) : null}
+
+      {/* Comments */}
+      <div style={{ marginTop:8, display:"grid", gap:6 }}>
+        {(report.comments||[]).map(c => (
+          <div key={c.id} className="comment">
+            <strong>{new Date(c.ts).toLocaleDateString()}</strong> — {c.text}
+          </div>
+        ))}
+        <div className="commentbox">
+          <input value={text} onChange={e=>setText(e.target.value)} placeholder="Add a comment (trail tip, condition, etc.)" />
+          <button className="btn secondary" onClick={()=>{ if (text.trim()) { onAddComment(report.id, text.trim()); setText(""); } }}>Post</button>
+        </div>
+      </div>
+
       {report.gps ? (
         <a href={report.gps} target="_blank" rel="noreferrer">View GPS/Map (external)</a>
       ) : null}
@@ -264,6 +295,18 @@ function parseCoords(input: string): { lat?: number; lng?: number } {
   const comma = /(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/.exec(input);
   if (comma) return { lat: parseFloat(comma[1]), lng: parseFloat(comma[2]) };
   return {};
+}
+
+async function compressImageToDataUrl(file: File, maxSize = 1400, quality = 0.8): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", quality);
 }
 
 function NewReportModal(props: { open: boolean; onClose: () => void; onCreate: (r: Report) => void }) {
@@ -282,6 +325,7 @@ function NewReportModal(props: { open: boolean; onClose: () => void; onCreate: (
   const [lat, setLat] = useState<string>("");
   const [lng, setLng] = useState<string>("");
   const [images, setImages] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(()=>{
@@ -298,10 +342,30 @@ function NewReportModal(props: { open: boolean; onClose: () => void; onCreate: (
     setConditions(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
   }
 
-  function onPickImages(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onPickImages(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
-    const urls = files.map(f => URL.createObjectURL(f));
-    setImages(prev => [...prev, ...urls]);
+    setBusy(true);
+    try {
+      const urls: string[] = [];
+      for (const f of files) {
+        const dataUrl = await compressImageToDataUrl(f, 1400, 0.82);
+        urls.push(dataUrl);
+      }
+      setImages(prev => [...prev, ...urls]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleUseGPS() {
+    if (!("geolocation" in navigator)) return alert("Geolocation not supported on this device.");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLat(String(pos.coords.latitude.toFixed(6)));
+        setLng(String(pos.coords.longitude.toFixed(6)));
+      },
+      () => alert("Unable to get GPS location.")
+    );
   }
 
   function handleCreate() {
@@ -327,7 +391,8 @@ function NewReportModal(props: { open: boolean; onClose: () => void; onCreate: (
       lat: typeof latNum === "number" ? latNum : undefined,
       lng: typeof lngNum === "number" ? lngNum : undefined,
       images,
-      helpful: 0
+      helpful: 0,
+      comments: []
     });
     onClose();
   }
@@ -339,7 +404,10 @@ function NewReportModal(props: { open: boolean; onClose: () => void; onCreate: (
       <div className="card" style={{ width:"100%", maxWidth:720, borderRadius:16, overflow:"hidden", maxHeight:"92vh" }}>
         <div className="row" style={{ justifyContent:"space-between", borderBottom:"1px solid #e5e7eb", padding:"12px 16px" }}>
           <h3>New Trail Report</h3>
-          <button className="btn secondary" onClick={onClose}>Close</button>
+          <div className="row">
+            <button className="btn secondary" onClick={handleUseGPS}>Use GPS</button>
+            <button className="btn secondary" onClick={onClose}>Close</button>
+          </div>
         </div>
         <div className="container" style={{ maxWidth: "100%", padding: 16 }}>
           <div className="grid" style={{ gridTemplateColumns:"1fr", gap:12 }}>
@@ -412,6 +480,7 @@ function NewReportModal(props: { open: boolean; onClose: () => void; onCreate: (
               <div>
                 <div style={{ fontWeight:600 }}>Photos</div>
                 <input ref={fileRef} type="file" accept="image/*" multiple onChange={onPickImages} />
+                {busy ? <div>Processing photos...</div> : null}
                 {images.length ? (
                   <div className="photos" style={{ marginTop:8 }}>
                     {images.map((src,i)=>(<img key={i} src={src} alt="preview" className="photo" />))}
@@ -453,6 +522,12 @@ export default function App() {
 
   function markHelpful(id: string) {
     const next = reports.map(r => r.id === id ? { ...r, helpful: r.helpful + 1 } : r);
+    setReports(next);
+    saveReports(next);
+  }
+
+  function addComment(id: string, text: string) {
+    const next = reports.map(r => r.id === id ? { ...r, comments: [...(r.comments||[]), { id: uid(), text, ts: Date.now() }] } : r);
     setReports(next);
     saveReports(next);
   }
@@ -515,12 +590,15 @@ export default function App() {
               setSort={setSort}
             />
           </div>
-          <MapStub reports={filtered} />
+          <div className="card">
+            <h3>Map</h3>
+            <LeafletMap reports={filtered} />
+          </div>
         </section>
 
         <section className="feed" style={{ marginTop:12 }}>
           {filtered.length ? (
-            filtered.map(r => <ReportCard key={r.id} report={r} onHelpful={markHelpful} />)
+            filtered.map(r => <ReportCard key={r.id} report={r} onHelpful={markHelpful} onAddComment={addComment} />)
           ) : (
             <Empty onNew={()=>setOpen(true)} />
           )}
@@ -529,7 +607,7 @@ export default function App() {
 
       <nav className="bottomnav" aria-label="Primary (mobile)">
         <button onClick={()=>{ setTab("feed"); window.scrollTo({ top: 0, behavior: "smooth" }); }} style={{ color: tab==="feed" ? "#065f46" : "#374151", fontWeight: tab==="feed" ? 700 : 400 }}>Feed</button>
-        <button onClick={()=>{ setTab("map"); document.querySelector("iframe")?.scrollIntoView({ behavior:"smooth" }); }} style={{ color: tab==="map" ? "#065f46" : "#374151", fontWeight: tab==="map" ? 700 : 400 }}>Map</button>
+        <button onClick={()=>{ setTab("map"); document.querySelector(".map")?.scrollIntoView({ behavior:"smooth" }); }} style={{ color: tab==="map" ? "#065f46" : "#374151", fontWeight: tab==="map" ? 700 : 400 }}>Map</button>
         <button onClick={()=>setOpen(true)}>Post</button>
       </nav>
 
