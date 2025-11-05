@@ -1,0 +1,7 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "env": {
+    "ROLLUP_SKIP_NODEJS_NATIVE": "1"
+  }
+}
